@@ -12,6 +12,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -137,7 +138,6 @@ void stack_push(struct stack *stack, struct value v) {
 
 // Never shrink the stack for now.
 struct value stack_pop(struct stack *stack) {
-    fprintf(stderr, "Popping a stack with %d elms\n", stack->used);
     if (stack->used == 0) {
         onlog(FATAL, "Attempting to pop empty stack", 0);
     }
@@ -191,7 +191,7 @@ void word_free(word *w) {
     w->capacity = 0;
 }
 
- #define entrycount 128
+#define entrycount 128
 
 struct words {
     struct wordentry *entries[entrycount];
@@ -284,7 +284,6 @@ void builtin_plus(struct stack *stack) {
         onlog(FATAL, "Attempting to add non-numbers", 0);
     double result = v1.n + v2.n;
 
-    printf("%lf + %lf = %lf\n", v1.n, v2.n, result);
     stack_push(stack, (struct value){.t=NUM,.n=result});
 }
 
@@ -346,6 +345,16 @@ void builtin_exit(struct stack *stack) {
     exit((int)v1.n);
 }
 
+bool match(char *string, char *match) {
+    int matched = 0;
+    while (*string == *match) {
+        // Only advance our match if we matched.
+        string++;
+        match++;
+    }
+    return (*match == '\0') && (isspace(*string) || *string == '\0');
+}
+
 char *chomp(char *string) {
     while(isspace(*string)) {
         string++;
@@ -378,6 +387,14 @@ char *handle_number(struct stack *stack, char *string) {
         value += (*(string++) - 48);
     }
 
+    if (*string == '.') {
+        string++;
+        double multiplier = 0.1;
+        while (isdigit(*(string))) {
+            value += ((*(string++) - 48)) * multiplier;
+            multiplier /= 10;
+        }
+    }
     stack_push(stack, (struct value){.t=NUM,.n=value});
     
     return string;
@@ -404,29 +421,39 @@ char *handle_string(struct stack *stack, char *string) {
 }
 
 char *handle_word_builtin(struct stack *stack, char *string) {
-    switch (*string) {
-    case '+':
+    char *builtinstring;
+    if (match(string, "+")) {
         builtin_plus(stack);
-        break;
-    case '-':
+        builtinstring = "+";
+    }
+    else if (match(string, "-")) {
         builtin_minus(stack);
-        break;
-    case '*':
+        
+        builtinstring = "-";
+    }
+    else if (match(string, "*")) {
         builtin_star(stack);
-        break;
-    case '/':
+        builtinstring = "*";
+    }
+    else if (match(string, "/")) {
         builtin_slash(stack);
-        break;
-    case 'd':
+        builtinstring = "/";
+    }
+    else if (match(string, "dump")) {
         builtin_dump(stack);
-        break;
-
-    default:
+        builtinstring = "dump";
+    }
+    else if (match(string, "exit")) {
+        builtin_exit(stack);
+        builtinstring = "exit";
+    }
+    else {
+        printf("%s: ", string);
         onlog(FATAL, "Invalid builtin", 0);
-        break;
     }
 
-    return string+1;
+    string += strlen(builtinstring);
+    return string;
 }
 
 int main(void) {
