@@ -101,10 +101,12 @@ void onlog(enum loglevel level, char *string, int line);
 void stack_push(struct stack *stack, struct value v);
 struct value stack_pop(struct stack *stack);
 
+struct value value_copy(struct value *v);
 void value_free(struct value *v);
 void value_print(struct value *v);
 
 void word_free(word *w);
+word word_copy(word *w);
 
 int words_hash(char *name, int max);
 word *words_get(char *name);
@@ -145,6 +147,29 @@ struct value stack_pop(struct stack *stack) {
 
 }
 
+struct value value_copy(struct value *v) {
+    struct value ret ={.t = v->t};
+    
+    switch (v->t) {
+    case NUM:
+        ret.n = v->n;
+        break;
+    case STRING:
+        ret.s = calloc(strlen(v->s)+1, sizeof(char));
+        checkmem(ret.s);
+        strcpy(ret.s, v->s);
+        break;
+
+    case WORD:
+        ret.w = word_copy(&v->w);
+        break;
+    default:
+        break;
+    }
+
+    return ret;
+}
+
 void value_free(struct value *v) {
     switch(v->t) {
     case WORD:
@@ -180,6 +205,13 @@ void value_print(struct value *v) {
     }
 }
 
+word word_copy(word *w) {
+    word ret = {.capacity = w->capacity, .used = w->used, .values = calloc(w->capacity, sizeof(struct value))};
+    checkmem(ret.values);
+
+    memcpy(ret.values, w->values, w->capacity * sizeof(struct value));
+    return ret;
+}
 void word_free(word *w) {
     for (size_t i = 0; i < w->used; i++) {
         value_free(&(w->values[i]));
@@ -346,7 +378,6 @@ void builtin_exit(struct stack *stack) {
 }
 
 bool match(char *string, char *match) {
-    int matched = 0;
     while (*string == *match) {
         // Only advance our match if we matched.
         string++;
@@ -446,6 +477,16 @@ char *handle_word_builtin(struct stack *stack, char *string) {
     else if (match(string, "exit")) {
         builtin_exit(stack);
         builtinstring = "exit";
+    }
+    else if (match(string, "pop")) {
+        stack_pop(stack);
+        builtinstring = "pop";
+    }
+    else if (match(string, "dup")) {
+        struct value v = stack_pop(stack);
+        stack_push(stack, v);
+        stack_push(stack, value_copy(&v));
+        builtinstring = "dup";
     }
     else {
         printf("%s: ", string);
