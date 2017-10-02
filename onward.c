@@ -47,12 +47,32 @@ struct stack {
     struct value *values;
 };
 
+enum builtins {
+    PLUS,
+    MINUS,
+    STAR,
+    SLASH,
+    DUMP,
+    EXIT,
+    REP,
+    DUP,
+    END,
+    BEGIN,
+    POP,
+    SWAP,
+    LOG,
+
+};
+
+
+
 struct value {
     enum type t;
     union {
         double n;
         char *s;
         struct stack w;
+        enum builtins b;
     };
 };
 
@@ -73,6 +93,7 @@ enum tok {
     PRINTTOK,
     REPTOK,
     DUPTOK,
+    DUMPTOK,
     EXITTOK
 };
 
@@ -102,9 +123,13 @@ void stack_push(struct stack *stack, struct value v);
 struct value stack_pop(struct stack *stack);
 
 struct value value_copy(struct value *v);
+void value_eval(struct stack *stack, struct value *v);
+void value_builtin_eval(struct stack *stack, struct value *v);
+void value_word_eval(struct stack *stack, struct value *v);
 void value_free(struct value *v);
 void value_print(struct value *v);
 
+word init_word(void);
 void word_free(word *w);
 word word_copy(word *w);
 
@@ -112,10 +137,12 @@ int words_hash(char *name, int max);
 word *words_get(char *name);
 void words_put(char *name, word word);
 
+
 void builtin_plus(struct stack *stack);
 void builtin_minus(struct stack *stack);
 void builtin_star(struct stack *stack);
 void builtin_slash(struct stack *stack);
+void builtin_end(struct stack *stack);
 void builtin_dump(struct stack *stack);
 void builtin_exit(struct stack *stack);
 
@@ -125,10 +152,14 @@ char *handle_word_builtin(struct stack *stack, char *string);
 
 char *chomp(char *string);
 void eval(struct stack *stack, char *string);
+bool match(char *string, char *match);
 
 /* Function Impls */
 
 void stack_push(struct stack *stack, struct value v) {
+    printf("Pushing ");
+    value_print(&v);
+    printf("\n");
     if (stack->capacity == stack->used) {
         onlog(DEBUG, "Stack resize", 0);
         stack->values = realloc(stack->values, stack->capacity *= 2);
@@ -176,10 +207,8 @@ void value_free(struct value *v) {
         word_free(&(v->w));
         break;
     case STRING:
-        free(v->s);
-        break;
     case BUILTIN:
-        onlog(FATAL, "Attempt to redefine a builtin", 0);
+        free(v->s);
         break;
     default:
         break;
@@ -187,6 +216,8 @@ void value_free(struct value *v) {
 }
 
 void value_print(struct value *v) {
+    char *builtins[] = {"PLUS", "MINUS", "STAR", "SLASH", "DUMP", "EXIT", "REP", "DUP",
+                        "END", "BEGIN", "POP", "SWAP", "LOG"};
     switch (v->t) {
     case WORD:
         builtin_dump(&(v->w));
@@ -198,18 +229,105 @@ void value_print(struct value *v) {
         printf("\"%s\"", v->s);
         break;
     case BUILTIN:
-        printf("<builtin>");
+        printf("<builtin %s> ", builtins[v->b]);
         break;
     default:
         printf("<unknown %p>", v->s);
     }
 }
 
+void value_eval(struct stack *stack, struct value *v) {
+
+    switch (v->t) {
+    case BUILTIN:
+        value_builtin_eval(stack, v);
+        break;
+    case WORD:
+        value_word_eval(stack, v);
+        break;
+        // All others are self-describing
+    default:
+        break;
+    }
+}
+
+/* void value_builtin_eval(struct stack *stack, struct value *builtin) { */
+
+/*     char *string = builtin->s; */
+    
+/*     if (match(string, "+")) { */
+/*         builtin_plus(stack); */
+/*     } */
+/*     else if (match(string, "-")) { */
+/*         builtin_minus(stack); */
+/*     } */
+/*     else if (match(string, "*")) { */
+/*         builtin_star(stack); */
+/*     } */
+/*     else if (match(string, "/")) { */
+/*         builtin_slash(stack); */
+/*     } */
+/*     else if (match(string, "dump")) { */
+/*         builtin_dump(stack); */
+/*     } */
+/*     else if (match(string, "exit")) { */
+/*         builtin_exit(stack); */
+/*     } */
+/*     else if (match(string, "pop")) { */
+/*         stack_pop(stack); */
+/*     } */
+/*     else if (match(string, "dup")) { */
+/*         struct value v = stack_pop(stack); */
+/*         stack_push(stack, v); */
+/*         stack_push(stack, value_copy(&v)); */
+/*     } */
+/*     else if (match(string, "rep")) { */
+/*         struct value n = stack_pop(stack); */
+/*         struct value repeat = stack_pop(stack); */
+
+/*         if (n.t != NUM || floor(n.n) != n.n || n.n <= 0) { */
+/*             onlog(FATAL, "Can't rep a non-positive integer amount of times", 0); */
+/*         } */
+
+/*         stack_push(stack, repeat); */
+    
+/*         for (int i = 0; i < (int)n.n-1; i++){ */
+/*             stack_push(stack, value_copy(&repeat)); */
+/*         } */
+    
+/*     } */
+/*     else { */
+/*         printf("%s: ", string); */
+/*         onlog(FATAL, "Invalid builtin", 0); */
+/*     } */
+
+/*     value_free(builtin); */
+/* } */
+
+void value_word_eval(struct stack *stack, struct value *v) {
+    word *w = &v->w;
+    for (int i = w->used-1; i >= 0; i--) {
+        // Push stuff backwards so that it looks right
+        stack_push(stack, value_copy(&(w->values[i])));
+        /*
+         * words are created starting when we see "end": we create a word and push
+         * everything onto the word stack until "begin" is seen. This means that the top
+         * of the stack is the first thing after begin.
+         */
+    }
+
+    // We don't free after a word eval, because the word is still valid.
+}
 word word_copy(word *w) {
     word ret = {.capacity = w->capacity, .used = w->used, .values = calloc(w->capacity, sizeof(struct value))};
     checkmem(ret.values);
 
     memcpy(ret.values, w->values, w->capacity * sizeof(struct value));
+    return ret;
+}
+
+word init_word() {
+    word ret = {.capacity=64, .used=0, .values=calloc(sizeof(struct value), 64)};
     return ret;
 }
 void word_free(word *w) {
@@ -312,8 +430,10 @@ void builtin_plus(struct stack *stack) {
     v1 = stack_pop(stack);
     v2 = stack_pop(stack);
 
-    if (v1.t != NUM || v2.t != NUM)
-        onlog(FATAL, "Attempting to add non-numbers", 0);
+    if (v1.t != NUM || v2.t != NUM) {
+        printf("%d %d", v1.t, v2.t);
+        onlog(FATAL, "Attempting to add non-numbers, type is ", 0);
+    }
     double result = v1.n + v2.n;
 
     stack_push(stack, (struct value){.t=NUM,.n=result});
@@ -325,10 +445,15 @@ void builtin_minus(struct stack *stack) {
     v1 = stack_pop(stack);
     v2 = stack_pop(stack);
 
+    v1 = value_expand(&v1);
+    v2 = value_expand(&v2);
     if (v1.t != NUM || v2.t != NUM)
         onlog(FATAL, "Attempting to add non-numbers", 0);
 
-    stack_push(stack, (struct value){.t=NUM,.n=(v1.n-v2.n)});
+    struct value ret =(struct value){.t=NUM,.n=(v1.n-v2.n)};
+    value_print(&ret);
+    stack_push(stack, ret);
+    builtin_dump(stack);
 }
 
 void builtin_star(struct stack *stack) {
@@ -356,6 +481,11 @@ void builtin_slash(struct stack *stack) {
 }
 
 
+void builtin_end(struct stack *stack) {
+    //    word newword = init_word();
+
+    onlog(FATAL, "Not yet implemented", 0);
+}
 void builtin_dump(struct stack *stack) {
     printf("[");
     for (size_t i = 0; i < stack->used; i++) {
@@ -377,6 +507,10 @@ void builtin_exit(struct stack *stack) {
     exit((int)v1.n);
 }
 
+void builtin_pop(struct stack *stack) {
+    struct value v = stack_pop(stack);
+    value_free(&v);
+}
 bool match(char *string, char *match) {
     while (*string == *match) {
         // Only advance our match if we matched.
@@ -451,51 +585,98 @@ char *handle_string(struct stack *stack, char *string) {
     return string+1;
 }
 
+bool executable(struct value *v) {
+    return (v->t == BUILTIN || v->t == WORD);
+}
+
+typedef void (*builtinfunc)(struct stack*);
+
+
+void value_builtin_eval(struct stack *stack, struct value *builtin) {
+    builtinfunc b[] = {builtin_plus, builtin_minus, builtin_star, builtin_slash,
+                       builtin_dump, builtin_exit};
+
+    b[builtin->b](stack);
+}
+
+void collapse(struct stack *stack) {
+    struct value v = stack_pop(stack);
+    while (executable(&v)) {
+        printf("Evaluating an executable with id %d\n", v.b);
+        value_eval(stack, &v);
+        v = stack_pop(stack);
+    }
+
+    if (!executable(&v))
+        stack_push(stack, v);
+}
+
 char *handle_word_builtin(struct stack *stack, char *string) {
-    char *builtinstring;
+    int jump = 0;
+    struct value v = {.t = BUILTIN};
+    
     if (match(string, "+")) {
-        builtin_plus(stack);
-        builtinstring = "+";
+        v.b = PLUS;
+        jump = 1;
     }
     else if (match(string, "-")) {
-        builtin_minus(stack);
-        
-        builtinstring = "-";
+        v.b = MINUS;
+        jump = 1;
     }
     else if (match(string, "*")) {
-        builtin_star(stack);
-        builtinstring = "*";
+        v.b = STAR;
+        jump = 1;
     }
     else if (match(string, "/")) {
-        builtin_slash(stack);
-        builtinstring = "/";
+        v.b = SLASH;
+        jump = 1;
     }
     else if (match(string, "dump")) {
-        builtin_dump(stack);
-        builtinstring = "dump";
+        v.b = DUMP;
+        jump = 4;
     }
     else if (match(string, "exit")) {
-        builtin_exit(stack);
-        builtinstring = "exit";
+        v.b = EXIT;
+        jump = 4;
     }
     else if (match(string, "pop")) {
-        stack_pop(stack);
-        builtinstring = "pop";
+        v.b = POP;
+        jump = 3;
     }
     else if (match(string, "dup")) {
-        struct value v = stack_pop(stack);
-        stack_push(stack, v);
-        stack_push(stack, value_copy(&v));
-        builtinstring = "dup";
+        v.b = DUP;
+        jump = 3;
     }
+    else if (match(string, "rep")) {
+        v.b = REP;
+        jump = 3;
+    }
+    else if (match(string, "end")) {
+        v.b = END;
+        jump = 3;
+    }
+    else if (match(string, "begin")) {
+        v.b = BEGIN;
+        jump = 5;
+    }
+    else if (match(string, ".")) {
+        collapse(stack);
+        jump = 1;
+        string += jump;
+        return string;
+    }
+     
     else {
         printf("%s: ", string);
         onlog(FATAL, "Invalid builtin", 0);
     }
 
-    string += strlen(builtinstring);
+    string += jump;
+
+    stack_push(stack, v);
     return string;
 }
+
 
 int main(void) {
     char buf[512] = {};
